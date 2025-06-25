@@ -100,7 +100,7 @@ def add_individual_qas_section(doc: Document, data: List[Dict[str, Any]]):
         p.add_run(f"{summary.get('ClientName', 'N/A')}\n")
         p.add_run("Ticket #: ").bold = True
         p.add_run(f"{summary.get('TicketNumber', 'N/A')}\n")
-        
+
         if items := call_data.get('evaluation_items', []):
             doc.add_heading("Evaluation Findings", level=4)
             table = doc.add_table(rows=1, cols=3)
@@ -164,17 +164,17 @@ class ReportDownloaderApp:
         self.agent_listbox = tk.Listbox(self.master, exportselection=False, height=8)
         self.agent_listbox.pack(fill="x", expand=True, padx=10)
         self.agent_listbox.bind("<<ListboxSelect>>", self.on_agent_select)
-        
+
         ttk.Label(self.master, text="2. Select a Combined Report:", font=("Segoe UI", 10, "bold")).pack(pady=(10,2), padx=10, anchor="w")
         self.date_listbox = tk.Listbox(self.master, exportselection=False, height=8)
         self.date_listbox.pack(fill="x", expand=True, padx=10)
-        
+
         ttk.Label(self.master, text="3. Choose Content to Include:", font=("Segoe UI", 10, "bold")).pack(pady=(10,5), padx=10, anchor="w")
         self.include_combined = tk.BooleanVar(value=True)
         self.include_individual = tk.BooleanVar(value=True)
         ttk.Checkbutton(self.master, text="Combined Analysis Report", variable=self.include_combined).pack(anchor="w", padx=20)
         ttk.Checkbutton(self.master, text="Associated Individual Call Details", variable=self.include_individual).pack(anchor="w", padx=20)
-        
+
         ttk.Button(self.master, text="Download Selected Report as .DOCX", command=self.on_download_click).pack(pady=20, padx=10, fill="x", ipady=5)
 
     def populate_agent_list(self):
@@ -214,7 +214,7 @@ class ReportDownloaderApp:
 
         selected_date_str = self.date_listbox.get(self.date_listbox.curselection())
         details = self.analysis_details.get(selected_date_str)
-        
+
         if self.include_individual.get() and (not details or not details.get('timestamp')):
             messagebox.showerror("Data Compatibility Error", "Cannot download individual details for this report as it lacks the required 'ProcessingDateTime' link.\nPlease re-import the data for this period.")
             return
@@ -228,7 +228,7 @@ class ReportDownloaderApp:
             _add_main_title(doc, f"Quality Assurance Report for {agent_name}")
             combined_data = self.fetch_combined_analysis_data(details['id']) if self.include_combined.get() else None
             individual_data = self.fetch_individual_qas_data(self.agents[agent_name], details['timestamp']) if self.include_individual.get() and details.get('timestamp') else None
-            
+
             if not combined_data and not individual_data:
                 messagebox.showerror("Data Error", "No data was selected or found for report generation.")
                 return
@@ -239,8 +239,27 @@ class ReportDownloaderApp:
             if individual_data:
                 if combined_data: doc.add_page_break()
                 add_individual_qas_section(doc, individual_data)
+                
             doc.save(save_path)
+
+            # --- MODIFICATION START ---
+            # Show a success message and then attempt to open the file.
             messagebox.showinfo("Success", f"Report successfully saved to:\n{save_path}")
+            try:
+                os.startfile(save_path)
+            except AttributeError:
+                # os.startfile() is only available on Windows.
+                # You can add alternatives for macOS and Linux here if needed.
+                # For example, using the 'subprocess' module:
+                # import subprocess
+                # subprocess.call(['open', save_path])  # macOS
+                # subprocess.call(['xdg-open', save_path]) # Linux
+                messagebox.showwarning("Cannot Open File", "File saved, but could not be opened automatically on this OS.")
+            except Exception as e:
+                # Handle other potential errors, like file not found (unlikely) or no associated application.
+                messagebox.showwarning("Could Not Open File", f"The report was saved, but an error occurred while trying to open it:\n{e}")
+            # --- MODIFICATION END ---
+
         except Exception as e:
             messagebox.showerror("Report Generation Failed", f"An unexpected error occurred:\n{e}")
 
@@ -249,7 +268,7 @@ class ReportDownloaderApp:
             cursor = self.conn.cursor()
             main_row = cursor.execute("SELECT * FROM CombinedAnalyses c JOIN Agents a ON c.AgentID = a.AgentID WHERE c.CombinedAnalysisID = ?;", analysis_id).fetchone()
             if not main_row: return None
-            
+
             report = {
                 "report_header": dict(zip([c[0] for c in main_row.cursor_description], main_row)),
                 "qualitative_summary_and_coaching_plan": {},
@@ -258,13 +277,13 @@ class ReportDownloaderApp:
             qscp = report["qualitative_summary_and_coaching_plan"]
             qscp["overall_strengths_observed"] = [r.StrengthText for r in cursor.execute("SELECT StrengthText FROM CombinedAnalysisStrengths WHERE CombinedAnalysisID = ?", analysis_id)]
             qscp["overall_areas_for_development"] = [r.DevelopmentAreaText for r in cursor.execute("SELECT DevelopmentAreaText FROM CombinedAnalysisDevelopmentAreas WHERE CombinedAnalysisID = ?", analysis_id)]
-            
+
             focus_items = []
             for focus_row in cursor.execute("SELECT CoachingFocusID, AreaText FROM CombinedAnalysisCoachingFocus WHERE CombinedAnalysisID = ?", analysis_id):
                 actions = [r.ActionText for r in cursor.execute("SELECT ActionText FROM CombinedAnalysisCoachingActions WHERE CoachingFocusID = ?", focus_row.CoachingFocusID)]
                 focus_items.append({"area": focus_row.AreaText, "specific_actions": actions})
             qscp["consolidated_coaching_focus"] = focus_items
-            
+
             report["detailed_quality_point_analysis"] = [dict(zip([c[0] for c in r.cursor_description], r)) for r in cursor.execute("SELECT qp.QualityPointText, d.TrendObservation FROM CombinedAnalysisQualityPointDetails d JOIN QualityPointsMaster qp ON d.QualityPointID = qp.QualityPointID WHERE d.CombinedAnalysisID = ?;", analysis_id)]
             return report
         except pyodbc.Error as e:
